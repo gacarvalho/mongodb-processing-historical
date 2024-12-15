@@ -47,7 +47,7 @@ def main():
     
             # Coleta métricas após o processamento
             metrics_collector.end_collection()
-            metrics_json = metrics_collector.collect_metrics(valid_df, invalid_df, validation_results, "silver_google_play")
+            metrics_json = metrics_collector.collect_metrics(valid_df, invalid_df, validation_results, "silver_internal_database")
             # Salvar métricas no MongoDB
             save_metrics(metrics_json)
 

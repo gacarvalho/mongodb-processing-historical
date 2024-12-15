@@ -206,18 +206,36 @@ def validate_ingest(spark: SparkSession, df: DataFrame) -> tuple:
 
     # Agora, gerando os registros inválidos de maneira mais direta
     invalid_records = df.filter(
-        (col("customer_id").isNotNull()) &
-        (col("rating").isNotNull()) &
-        (col("comment").isNotNull()) &
-        (col("app_version").isNotNull()) &
-        (col("cpf").isNotNull()) &
-        (col("app").isNotNull()) &
-        (col("os").isNotNull()) &
-        (col("os_version").isNotNull()) &
-        (col("timestamp").isNotNull())
+        (col("customer_id").isNull()) |
+        (col("rating").isNull()) |
+        (col("comment").isNull()) |
+        (col("app_version").isNull()) |
+        (col("cpf").isNull()) |
+        (col("app").isNull()) |
+        (col("os").isNull()) |
+        (col("os_version").isNull()) |
+        (col("timestamp").isNull())
     )
 
     # Se houver duplicatas, adicionamos ao DataFrame de inválidos
+    # Seleciona apenas a coluna "id" do duplicates
+    duplicate_ids = duplicates.select("id")
+
+    # Filtra os registros completos de df com base nos IDs duplicados
+    duplicates_records = df.join(duplicate_ids, on="id", how="inner").select(
+        df["id"],
+        df["customer_id"],
+        df["cpf"],
+        df["app"],
+        df["rating"],
+        df["timestamp"],
+        df["comment"],
+        df["app_version"],
+        df["os_version"],
+        df["os"],
+        df["historical_data"]
+    )
+
     if duplicate_count > 0:
         invalid_records = invalid_records.union(duplicates)
 
