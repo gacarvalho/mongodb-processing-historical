@@ -52,20 +52,20 @@ def main():
             save_metrics(metrics_json)
 
     except Exception as e:
-        logging.error(f"An error occurred: {e}", exc_info=True)
+        logging.error(f"[*] An error occurred: {e}", exc_info=True)
     finally:
         spark.stop()
 
 def spark_session():
     try:
         spark = SparkSession.builder \
-            .appName("App Reviews [apple store]") \
+            .appName("App Reviews [mongodb internal-database]") \
             .config("spark.jars.packages", "org.apache.spark:spark-measure_2.12:0.16") \
             .config("spark.sql.parquet.enableVectorizedReader", "false") \
             .getOrCreate()
         return spark
     except Exception as e:
-        logging.error(f"Failed to create SparkSession: {e}", exc_info=True)
+        logging.error(f"[*] Failed to create SparkSession: {e}", exc_info=True)
         raise
 
 def save_metrics(metrics_json):
@@ -75,9 +75,9 @@ def save_metrics(metrics_json):
     try:
         metrics_data = json.loads(metrics_json)
         write_to_mongo(metrics_data, "dt_datametrics_compass")
-        logging.info(f"Métricas da aplicação salvas: {metrics_json}")
+        logging.info(f"[*] Métricas da aplicação salvas: {metrics_json}")
     except json.JSONDecodeError as e:
-        logging.error(f"Erro ao processar métricas: {e}", exc_info=True)
+        logging.error(f"[*] Erro ao processar métricas: {e}", exc_info=True)
 
 if __name__ == "__main__":
     main()

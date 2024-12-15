@@ -108,7 +108,7 @@ class MetricsCollector:
         return json.dumps(metrics)
 
 def print_validation_results(results: dict):
-    print(f"\nValidação da ingestão concluída para {results['total_records']} registros.\n")
+    print(f"\n[*] Validação da ingestão concluída para {results['total_records']} registros.\n")
     for check, result in results.items():
         if check != "total_records":
             status = "PASSOU" if result["status"] else "FALHOU"

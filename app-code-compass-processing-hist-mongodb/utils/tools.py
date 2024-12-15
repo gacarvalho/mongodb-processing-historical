@@ -4,11 +4,12 @@ import pymongo
 import pyspark.sql.functions as F
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.functions import upper, udf, col
-from pyspark.sql.types import StringType, StructType, StructField
+from pyspark.sql.types import StringType, StructType, StructField, IntegerType
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote_plus
 from unidecode import unidecode
+from schema_mongodb import mongodb_schema_silver
 
 
 # Função para remover acentos
@@ -60,10 +61,10 @@ def save_reviews(reviews_df: DataFrame, directory: str):
         # Escrever os dados no formato Delta
         # reviews_df.write.format("delta").mode("overwrite").save(directory)
         reviews_df.write.option("compression", "snappy").mode("overwrite").parquet(directory)
-        logging.info(f"Dados salvos em {directory} no formato Delta")
+        logging.info(f"[*] Dados salvos em {directory} no formato Delta")
 
     except Exception as e:
-        logging.error(f"Erro ao salvar os dados: {e}")
+        logging.error(f"[*] Erro ao salvar os dados: {e}")
         exit(1)
 
 
@@ -72,13 +73,17 @@ def save_dataframe(df, path, label):
     Salva o DataFrame em formato parquet e loga a operação.
     """
     try:
+        schema = mongodb_schema_silver()
+        # Alinhar o DataFrame ao schema definido
+        df = get_schema(df, schema)
+
         if df.limit(1).count() > 0:  # Verificar existência de dados
-            logging.info(f"Salvando dados {label} para: {path}")
+            logging.info(f"[*] Salvando dados {label} para: {path}")
             save_reviews(df, path)
         else:
-            logging.warning(f"Nenhum dado {label} foi encontrado!")
+            logging.warning(f"[*] Nenhum dado {label} foi encontrado!")
     except Exception as e:
-        logging.error(f"Erro ao salvar dados {label}: {e}", exc_info=True)
+        logging.error(f"[*] Erro ao salvar dados {label}: {e}", exc_info=True)
         
 def write_to_mongo(dados_feedback: dict, table_id: str):
 
@@ -112,12 +117,22 @@ def write_to_mongo(dados_feedback: dict, table_id: str):
         elif isinstance(dados_feedback, list):  # Verifica se os dados são uma lista
             collection.insert_many(dados_feedback)
         else:
-            print("Os dados devem ser um dicionário ou uma lista de dicionários.")
+            print("[*] Os dados devem ser um dicionário ou uma lista de dicionários.")
     finally:
         # Garante que a conexão será fechada
         client.close()
 
 
+def get_schema(df, schema):
+    """
+    Obtém o DataFrame a seguir o schema especificado.
+    """
+    for field in schema.fields:
+        if field.dataType == IntegerType():
+            df = df.withColumn(field.name, df[field.name].cast(IntegerType()))
+        elif field.dataType == StringType():
+            df = df.withColumn(field.name, df[field.name].cast(StringType()))
+    return df.select([field.name for field in schema.fields])
 
 
 def processing_old_new(spark: SparkSession, df: DataFrame):

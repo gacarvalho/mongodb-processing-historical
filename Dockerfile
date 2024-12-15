@@ -1,5 +1,5 @@
 # Usando ARG para passar a variável de pasta durante o build
-ARG FOLDER_REPO="repo-extract-reviews-apple-store"
+ARG FOLDER_REPO="dmc-app-silver-reviews-mongodb"
 
 FROM iamgacarvalho/spark-base-data-in-compass:0.0.3
 
