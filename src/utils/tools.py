@@ -183,11 +183,12 @@ def processing_old_new(spark: SparkSession, df: DataFrame):
     df_historical.printSchema()
 
     # Definindo aliases para os DataFrames
-    new_reviews_df_alias = df.alias("new")  # DataFrame de novos reviews
+    new_reviews_df_alias = df.withColumn("cpf_n", F.col("cpf")).alias("new")  # DataFrame de novos reviews
     historical_reviews_df_alias = df_historical.alias("old")  # DataFrame de reviews históricos
 
     # Junção dos DataFrames
-    joined_reviews_df = new_reviews_df_alias.join(historical_reviews_df_alias, "cpf", "outer")
+    joined_reviews_df = new_reviews_df_alias.join(historical_reviews_df_alias, new_reviews_df_alias.cpf_n == historical_reviews_df_alias.cpf, "outer")
+
 
     # Criação da coluna historical_data
     result_df_historical = joined_reviews_df.withColumn(
@@ -206,7 +207,7 @@ def processing_old_new(spark: SparkSession, df: DataFrame):
                 F.col("old.os").alias("os")
             ))
         ).when(
-            (F.col("new.cpf").isNotNull()) & (F.col("old.cpf").isNotNull()) & (F.col("new.cpf") != F.col("old.cpf")),
+            (F.col("new.cpf_n").isNotNull()) & (F.col("old.cpf").isNotNull()) & (F.col("new.cpf_n") != F.col("old.cpf")),
             F.array(F.struct(
                 F.col("old.customer_id").alias("customer_id"),
                 F.col("old.cpf").alias("cpf"),
@@ -318,7 +319,7 @@ def processing_old_new(spark: SparkSession, df: DataFrame):
     # Agrupando e coletando históricos
     df_final = result_df_historical.groupBy("new.id").agg(
     F.coalesce(F.first(F.col("new.customer_id")), F.first(F.col("old.customer_id"))).alias("customer_id"),
-    F.coalesce(F.first(F.col("new.cpf")), F.first(F.col("old.cpf"))).alias("cpf"),
+    F.coalesce(F.first(F.col("new.cpf_n")), F.first(F.col("old.cpf"))).alias("cpf"),
     F.coalesce(F.first(F.col("new.app")), F.first(F.col("old.app"))).alias("app"),
     F.coalesce(F.first(F.col("new.rating")), F.first(F.col("old.rating"))).alias("rating"),
     F.coalesce(F.first(F.col("new.timestamp")), F.first(F.col("old.timestamp"))).alias("timestamp"),
