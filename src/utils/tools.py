@@ -313,17 +313,18 @@ def processing_old_new(spark: SparkSession, df: DataFrame):
 
     # Agrupando e coletando históricos
     df_final = result_df.groupBy("new.id").agg(
-        F.coalesce(F.first(F.col("new.customer_id")), F.first(F.col("old.customer_id"))).alias("customer_id"),
-        F.coalesce(F.first(F.col("new.cpf")), F.first(F.col("old.cpf"))).alias("cpf"),
-        F.coalesce(F.first(F.col("new.app")), F.first(F.col("old.app"))).alias("app"),
-        F.coalesce(F.first(F.col("new.rating")), F.first(F.col("old.rating"))).alias("rating"),
-        F.coalesce(F.first(F.col("new.timestamp")), F.first(F.col("old.timestamp"))).alias("timestamp"),
-        F.coalesce(F.first(F.col("new.comment")), F.first(F.col("old.comment"))).alias("comment"),
-        F.coalesce(F.first(F.col("new.app_version")), F.first(F.col("old.app_version"))).alias("app_version"),
-        F.coalesce(F.first(F.col("new.os_version")), F.first(F.col("old.os_version"))).alias("os_version"),
-        F.coalesce(F.first(F.col("new.os")), F.first(F.col("old.os"))).alias("os"),
-        F.collect_list("historical_data_temp").alias("historical_data"),
-    )
+    F.coalesce(F.first(F.col("new.customer_id")), F.first(F.col("old.customer_id"))).alias("customer_id"),
+    F.coalesce(F.first(F.col("new.cpf")), F.first(F.col("old.cpf"))).alias("cpf"),
+    F.coalesce(F.first(F.col("new.app")), F.first(F.col("old.app"))).alias("app"),
+    F.coalesce(F.first(F.col("new.rating")), F.first(F.col("old.rating"))).alias("rating"),
+    F.coalesce(F.first(F.col("new.timestamp")), F.first(F.col("old.timestamp"))).alias("timestamp"),
+    F.coalesce(F.first(F.col("new.comment")), F.first(F.col("old.comment"))).alias("comment"),
+    F.coalesce(F.first(F.col("new.app_version")), F.first(F.col("old.app_version"))).alias("app_version"),
+    F.coalesce(F.first(F.col("new.os_version")), F.first(F.col("old.os_version"))).alias("os_version"),
+    F.coalesce(F.first(F.col("new.os")), F.first(F.col("old.os"))).alias("os"),
+    F.collect_list("historical_data_temp").alias("historical_data"),
+)
+
 
     # Exibe o resultado
     df_final.show(truncate=False)
