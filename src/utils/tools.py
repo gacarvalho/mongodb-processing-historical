@@ -311,6 +311,9 @@ def processing_old_new(spark: SparkSession, df: DataFrame):
         )
     )
 
+    print("tests")
+    result_df.printSchema()
+
     # Agrupando e coletando históricos
     df_final = result_df.groupBy("new.id").agg(
     F.coalesce(F.first(F.col("new.customer_id")), F.first(F.col("old.customer_id"))).alias("customer_id"),
