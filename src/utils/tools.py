@@ -181,6 +181,7 @@ def processing_old_new(spark: SparkSession, df: DataFrame):
         df_historical = spark.createDataFrame([], schema)
 
     df_historical.printSchema()
+
     # Definindo aliases para os DataFrames
     new_reviews_df_alias = df.alias("new")  # DataFrame de novos reviews
     historical_reviews_df_alias = df_historical.alias("old")  # DataFrame de reviews históricos
@@ -189,7 +190,7 @@ def processing_old_new(spark: SparkSession, df: DataFrame):
     joined_reviews_df = new_reviews_df_alias.join(historical_reviews_df_alias, "cpf", "outer")
 
     # Criação da coluna historical_data
-    result_df = joined_reviews_df.withColumn(
+    result_df_historical = joined_reviews_df.withColumn(
         "historical_data_temp",
         F.when(
             (F.col("new.customer_id").isNotNull()) & (F.col("old.customer_id").isNotNull()) & (F.col("new.customer_id") != F.col("old.customer_id")),
@@ -312,10 +313,10 @@ def processing_old_new(spark: SparkSession, df: DataFrame):
     )
 
     print("tests")
-    result_df.printSchema()
+    result_df_historical.printSchema()
 
     # Agrupando e coletando históricos
-    df_final = result_df.groupBy("new.id").agg(
+    df_final = result_df_historical.groupBy("new.id").agg(
     F.coalesce(F.first(F.col("new.customer_id")), F.first(F.col("old.customer_id"))).alias("customer_id"),
     F.coalesce(F.first(F.col("new.cpf")), F.first(F.col("old.cpf"))).alias("cpf"),
     F.coalesce(F.first(F.col("new.app")), F.first(F.col("old.app"))).alias("app"),
