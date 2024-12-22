@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote_plus
 from unidecode import unidecode
-from schema_mongodb import mongodb_schema_silver
+from src.schemas.schema_mongodb import mongodb_schema_silver
 
 
 # Função para remover acentos

@@ -5,7 +5,7 @@ from pyspark.sql.functions import col
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.functions import col, count, when
 from sparkmeasure import StageMetrics
-from tools import *
+from src.utils.tools import *
 
 class MetricsCollector:
     """
@@ -237,7 +237,7 @@ def validate_ingest(spark: SparkSession, df: DataFrame) -> tuple:
     )
 
     if duplicate_count > 0:
-        invalid_records = invalid_records.union(duplicates)
+        invalid_records = invalid_records.union(duplicates_records)
 
     print_validation_results(validation_results)
 

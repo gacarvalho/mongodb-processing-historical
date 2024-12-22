@@ -29,7 +29,7 @@ def main():
             path_target = f"/santander/silver/compass/reviews/mongodb/odate={datePath}/"
             path_target_fail = f"/santander/silver/compass/reviews_fail/mongodb/odate={datePath}/"
 
-            df_processado = processing_reviews(spark, pathSource)  # Função presumida; ajuste conforme necessário
+            df_processado = processing_reviews(spark, pathSource)
             
             
 
