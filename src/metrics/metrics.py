@@ -7,10 +7,10 @@ from pyspark.sql.functions import col, count, when
 from sparkmeasure import StageMetrics
 try:
     # Obtem import para cenarios de execuções em ambiente PRE, PRD
-    from tools import *
+    from tools import processing_old_new
 except ModuleNotFoundError:
     # Obtem import para cenarios de testes unitarios
-    from src.utils.tools import *
+    from src.utils.tools import processing_old_new
 
 
 

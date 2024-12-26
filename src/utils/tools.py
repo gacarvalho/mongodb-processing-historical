@@ -10,10 +10,8 @@ from pathlib import Path
 from urllib.parse import quote_plus
 from unidecode import unidecode
 try:
-    from metrics import *
     from schema_mongodb import mongodb_schema_silver
 except ModuleNotFoundError:
-    from src.metrics.metrics import *
     from src.schemas.schema_mongodb import mongodb_schema_silver
 
 
