@@ -9,7 +9,12 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote_plus
 from unidecode import unidecode
-from src.schemas.schema_mongodb import mongodb_schema_silver
+try:
+    # Obtem import para cenarios de execuções em ambiente PRE, PRD
+    from metrics import MetricsCollector, validate_ingest
+except ModuleNotFoundError:
+    # Obtem import para cenarios de testes unitarios
+    from src.metrics.metrics import MetricsCollector, validate_ingest
 
 
 # Função para remover acentos
