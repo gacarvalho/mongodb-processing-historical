@@ -2,9 +2,17 @@ import logging
 import sys
 import json
 from pyspark.sql import SparkSession
-from metrics import MetricsCollector, validate_ingest
 from datetime import datetime
-from tools import *
+try:
+    # Obtem import para cenarios de execuções em ambiente PRE, PRD
+    from tools import *
+    from metrics import MetricsCollector, validate_ingest
+except ModuleNotFoundError:
+    # Obtem import para cenarios de testes unitarios
+    from src.utils.tools import *
+    from src.metrics.metrics import MetricsCollector, validate_ingest
+
+
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
