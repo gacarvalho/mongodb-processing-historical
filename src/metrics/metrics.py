@@ -5,7 +5,14 @@ from pyspark.sql.functions import col
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.functions import col, count, when
 from sparkmeasure import StageMetrics
-from src.utils.tools import *
+try:
+    # Obtem import para cenarios de execuções em ambiente PRE, PRD
+    from tools import *
+except ModuleNotFoundError:
+    # Obtem import para cenarios de testes unitarios
+    from src.utils.tools import *
+
+
 
 class MetricsCollector:
     """

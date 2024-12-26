@@ -4,7 +4,7 @@ from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.types import StructType, StructField, IntegerType, StringType
 from datetime import datetime
 from unittest.mock import MagicMock, patch
-from src.utils.tools import processing_reviews, save_dataframe
+from src.utils.tools import *
 from src.metrics.metrics import validate_ingest
 
 @pytest.fixture(scope="session")

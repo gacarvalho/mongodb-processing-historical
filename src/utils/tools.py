@@ -10,11 +10,11 @@ from pathlib import Path
 from urllib.parse import quote_plus
 from unidecode import unidecode
 try:
-    # Obtem import para cenarios de execuções em ambiente PRE, PRD
-    from metrics import MetricsCollector, validate_ingest
+    from metrics import *
+    from schema_mongodb import mongodb_schema_silver
 except ModuleNotFoundError:
-    # Obtem import para cenarios de testes unitarios
-    from src.metrics.metrics import MetricsCollector, validate_ingest
+    from src.metrics.metrics import *
+    from src.schemas.schema_mongodb import mongodb_schema_silver
 
 
 # Função para remover acentos

@@ -13,7 +13,6 @@ except ModuleNotFoundError:
     from src.metrics.metrics import MetricsCollector, validate_ingest
 
 
-
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def main():
