@@ -330,7 +330,7 @@ def processing_old_new(spark: SparkSession, df: DataFrame):
     F.coalesce(F.first(F.col("new.app_version")), F.first(F.col("old.app_version"))).alias("app_version"),
     F.coalesce(F.first(F.col("new.os_version")), F.first(F.col("old.os_version"))).alias("os_version"),
     F.coalesce(F.first(F.col("new.os")), F.first(F.col("old.os"))).alias("os"),
-    F.collect_list("historical_data_temp").alias("historical_data"),
+        F.flatten(F.collect_list("historical_data_temp")).alias("historical_data")
 )
 
 
