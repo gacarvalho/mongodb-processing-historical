@@ -21,42 +21,43 @@ def main():
     args = sys.argv
     print("[*] ARGUMENTOS: " + str(args))
 
+
+    # Criação da sessão Spark
+    spark = spark_session()
+
     try:
-        # Criação da sessão Spark
-        with spark_session() as spark:
+        # Coleta de métricas
+        metrics_collector = MetricsCollector(spark)
+        metrics_collector.start_collection()
 
-            # Coleta de métricas
-            metrics_collector = MetricsCollector(spark)
-            metrics_collector.start_collection()
+        datePath = datetime.now().strftime("%Y%m%d")
 
-            datePath = datetime.now().strftime("%Y%m%d")
+        # Definindo caminhos
+        pathSource = f"/santander/bronze/compass/reviews/mongodb/*/odate={datePath}/"
+        path_target = f"/santander/silver/compass/reviews/mongodb/odate={datePath}/"
+        path_target_fail = f"/santander/silver/compass/reviews_fail/mongodb/odate={datePath}/"
 
-            # Definindo caminhos
-            pathSource = f"/santander/bronze/compass/reviews/mongodb/*/odate={datePath}/"
-            path_target = f"/santander/silver/compass/reviews/mongodb/odate={datePath}/"
-            path_target_fail = f"/santander/silver/compass/reviews_fail/mongodb/odate={datePath}/"
+        df_processado = processing_reviews(spark, pathSource)
 
-            df_processado = processing_reviews(spark, pathSource)
-            
-            
 
-            #Valida o DataFrame e coleta resultados
-            valid_df, invalid_df, validation_results = validate_ingest(spark, df_processado)
 
-            valid_df.printSchema()
-            valid_df.show(valid_df.count(), truncate=False)
+        #Valida o DataFrame e coleta resultados
+        valid_df, invalid_df, validation_results = validate_ingest(spark, df_processado)
 
-            # Salvar dados válidos
-            save_dataframe(valid_df, path_target, "valido")
+        valid_df.printSchema()
+        valid_df.show(valid_df.count(), truncate=False)
 
-            # Salvar dados inválidos
-            save_dataframe(invalid_df, path_target_fail, "invalido")
-    
-            # Coleta métricas após o processamento
-            metrics_collector.end_collection()
-            metrics_json = metrics_collector.collect_metrics(valid_df, invalid_df, validation_results, "silver_internal_database")
-            # Salvar métricas no MongoDB
-            save_metrics(metrics_json)
+        # Salvar dados válidos
+        save_dataframe(valid_df, path_target, "valido")
+
+        # Salvar dados inválidos
+        save_dataframe(invalid_df, path_target_fail, "invalido")
+
+        # Coleta métricas após o processamento
+        metrics_collector.end_collection()
+        metrics_json = metrics_collector.collect_metrics(valid_df, invalid_df, validation_results, "silver_internal_database")
+        # Salvar métricas no MongoDB
+        save_metrics(metrics_json)
 
     except Exception as e:
         logging.error(f"[*] An error occurred: {e}", exc_info=True)
@@ -76,8 +77,6 @@ def main():
 
         # Salvar métricas de erro no MongoDB
         save_metrics_job_fail(metrics_json)
-
-
 
     finally:
         spark.stop()
