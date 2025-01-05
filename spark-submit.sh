@@ -88,7 +88,7 @@ run_spark_submit() {
     --conf spark.yarn.appMasterEnv.MONGO_PORT=27017 \
     --conf spark.yarn.appMasterEnv.MONGO_DB=compass \
     --name dmc_silver_reviews_mongodb_$CONFIG_ENV \
-    /app/repo_trfmation_mongodb.py" $CONFIG_ENV"
+    /app/repo_trfmation_mongodb.py" $CONFIG_ENV
 
   # Exibe o comando para depuração
   log "Comando spark-submit que será executado: $spark_cmd"
