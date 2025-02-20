@@ -354,7 +354,7 @@ def processing_old_new(spark: SparkSession, df: DataFrame):
                 F.col("old.os").alias("os")
             ))
         )
-    )
+    ).distinct()
 
     result_df_historical.printSchema()
 
