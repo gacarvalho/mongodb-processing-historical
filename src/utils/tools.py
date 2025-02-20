@@ -102,43 +102,6 @@ def save_dataframe(df, path, label):
         # Salvar métricas de erro no MongoDB
         save_metrics_job_fail(metrics_json)
         
-def write_to_mongo(dados_feedback: dict, table_id: str):
-
-    mongo_user = os.environ["MONGO_USER"]
-    mongo_pass = os.environ["MONGO_PASS"]
-    mongo_host = os.environ["MONGO_HOST"]
-    mongo_port = os.environ["MONGO_PORT"]
-    mongo_db = os.environ["MONGO_DB"]
-
-    # ---------------------------------------------- Escapar nome de usuário e senha ----------------------------------------------
-    # A função quote_plus transforma caracteres especiais em seu equivalente escapado, de modo que o
-    # URI seja aceito pelo MongoDB. Por exemplo, m@ngo será convertido para m%40ngo.
-    escaped_user = quote_plus(mongo_user)
-    escaped_pass = quote_plus(mongo_pass)
-
-    # ---------------------------------------------- Conexão com MongoDB ----------------------------------------------------------
-    # Quando definimos maxPoolSize=1, estamos dizendo ao MongoDB para manter apenas uma conexão aberta no pool.
-    # Isso implica que cada vez que uma nova operação precisa de uma conexão, a conexão existente será
-    # reutilizada em vez de criar uma nova.
-    mongo_uri = f"mongodb://{escaped_user}:{escaped_pass}@{mongo_host}:{mongo_port}/{mongo_db}?authSource={mongo_db}&maxPoolSize=1"
-
-    client = pymongo.MongoClient(mongo_uri)
-
-    try:
-        db = client[mongo_db]
-        collection = db[table_id]
-
-        # Inserir dados no MongoDB
-        if isinstance(dados_feedback, dict):  # Verifica se os dados são um dicionário
-            collection.insert_one(dados_feedback)
-        elif isinstance(dados_feedback, list):  # Verifica se os dados são uma lista
-            collection.insert_many(dados_feedback)
-        else:
-            print("[*] Os dados devem ser um dicionário ou uma lista de dicionários.")
-    finally:
-        # Garante que a conexão será fechada
-        client.close()
-
 
 def get_schema(df, schema):
     """
