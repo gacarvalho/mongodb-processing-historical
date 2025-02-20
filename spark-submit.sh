@@ -1,4 +1,4 @@
-#!/bin/bash 
+#!/bin/bash
 
 # Função para imprimir logs com timestamp
 log() {
@@ -22,7 +22,6 @@ validate_params() {
   if [[ -z "$CONFIG_ENV" ]]; then
     error_exit "O parâmetro CONFIG_ENV (pre ou prod) é obrigatório!"
   fi
-
 }
 
 # Função para carregar configurações do arquivo YAML
@@ -41,7 +40,6 @@ load_yaml_config() {
   parallelism=$(yq e '.spark.spark_default_parallelism' "$config_file")
   shuffle_partitions=$(yq e '.spark.spark_sql_shuffle_partitions' "$config_file")
   network_timeout=$(yq e '.spark.spark_network_timeout' "$config_file" // "600s")
-
 
   log "Configurações carregadas do YAML: $config_file"
 }
@@ -66,7 +64,6 @@ run_spark_submit() {
     --conf spark.sql.shuffle.partitions=$shuffle_partitions \
     --conf spark.pyspark.python=/usr/bin/python3 \
     --conf spark.pyspark.driver.python=/usr/bin/python3 \
-    --conf 'spark.driver.extraJavaOptions=-Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote.port=8090 -Dcom.sun.management.jmxremote.rmi.port=8091 -Dcom.sun.management.jmxremote.authenticate=false -Dcom.sun.management.jmxremote.ssl=false -Djava.rmi.server.hostname=10.101.34.131' \
     --conf spark.metrics.conf=/usr/local/spark/conf/metrics.properties \
     --conf spark.ui.prometheus.enabled=true \
     --conf spark.executor.processTreeMetrics.enabled=true \
@@ -74,21 +71,27 @@ run_spark_submit() {
     --py-files /app/dependencies.zip,/app/metrics.py,/app/tools.py,/app/schema_mongodb.py \
     --conf spark.executorEnv.MONGO_USER=$MONGO_USER \
     --conf spark.executorEnv.MONGO_PASS=$MONGO_PASS\
+    --conf spark.executorEnv.ES_USER=$ES_USER \
+    --conf spark.executorEnv.ES_PASS=$ES_PASS\
     --conf spark.executorEnv.MONGO_HOST=mongodb \
     --conf spark.executorEnv.MONGO_PORT=27017 \
     --conf spark.executorEnv.MONGO_DB=compass \
     --conf spark.driverEnv.MONGO_USER=$MONGO_USER \
     --conf spark.driverEnv.MONGO_PASS=$MONGO_PASS\
+    --conf spark.driverEnv.ES_USER=$ES_USER \
+    --conf spark.driverEnv.ES_PASS=$ES_PASS \
     --conf spark.driverEnv.MONGO_HOST=mongodb \
     --conf spark.driverEnv.MONGO_PORT=27017 \
     --conf spark.driverEnv.MONGO_DB=compass \
     --conf spark.yarn.appMasterEnv.MONGO_USER=$MONGO_USER \
     --conf spark.yarn.appMasterEnv.MONGO_PASS=$MONGO_PASS\
+    --conf spark.yarn.appMasterEnv.ES_USER=$ES_USER \
+    --conf spark.yarn.appMasterEnv.ES_PASS=$ES_PASS \
     --conf spark.yarn.appMasterEnv.MONGO_HOST=mongodb \
     --conf spark.yarn.appMasterEnv.MONGO_PORT=27017 \
     --conf spark.yarn.appMasterEnv.MONGO_DB=compass \
     --name dmc_silver_reviews_mongodb_$CONFIG_ENV \
-    /app/repo_trfmation_mongodb.py" $CONFIG_ENV
+    /app/repo_trfmation_mongodb.py $CONFIG_ENV"
 
   # Exibe o comando para depuração
   log "Comando spark-submit que será executado: $spark_cmd"
@@ -98,7 +101,7 @@ run_spark_submit() {
   local exit_code=$?
 
   if [[ $exit_code -ne 0 ]]; then
-    error_exit "Falha ao executar o Spark Submit (código de saída: $exit_code)."
+    error_exit "Falha ao executar o Spark Submit (código de saída: $exit_code)"
   else
     log "Spark Submit executado com sucesso!"
   fi
@@ -120,7 +123,6 @@ else
   echo "Ambiente inválido! Use 'pre' ou 'prod', param enviado: $CONFIG_ENV."
   exit 1
 fi
-
 
 # Valida as variáveis de ambiente e parâmetros
 validate_params

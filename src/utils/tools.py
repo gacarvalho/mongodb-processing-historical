@@ -4,12 +4,14 @@ import logging
 import pymongo
 import pyspark.sql.functions as F
 from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql.functions import upper, udf, col
+from pyspark.sql.functions import upper, udf, col, regexp_extract, input_file_name, lit
 from pyspark.sql.types import StringType, StructType, StructField, IntegerType
+from pyspark.sql.utils import AnalysisException
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote_plus
 from unidecode import unidecode
+from elasticsearch import Elasticsearch
 try:
     from schema_mongodb import mongodb_schema_silver
 except ModuleNotFoundError:
@@ -22,14 +24,22 @@ def remove_accents(s):
 
 remove_accents_udf = F.udf(remove_accents, StringType())
 
+def read_source_parquet(spark, path):
+    """Tenta ler um Parquet e retorna None se não houver dados"""
+    try:
+        df = spark.read.parquet(path)
+        if df.isEmpty():
+            print(f"[*] Nenhum dado encontrado em: {path}")
+            return None
+        return df.withColumn("app", regexp_extract(input_file_name(), "/mongodb/(.*?)/odate=", 1)) \
+            .withColumn("segmento", regexp_extract(input_file_name(), r"/mongodb/[^/_]+_([pfj]+)/odate=", 1))
+    except AnalysisException:
+        print(f"[*] Falha ao ler: {path}. O arquivo pode não existir.")
+        return None
 
-def processing_reviews(spark: SparkSession, pathSource: str):
+def processing_reviews(df: DataFrame):
 
     logging.info(f"{datetime.now().strftime('%Y%m%d %H:%M:%S.%f')} [*] Processando o tratamento da camada historica")
-
-    # Criar o DataFrame
-    df = spark.read.parquet(pathSource)
-
 
     # Aplicando as transformações no DataFrame
     df_select = df.select(
@@ -37,6 +47,7 @@ def processing_reviews(spark: SparkSession, pathSource: str):
         "cpf",
         "customer_id",
         "age",
+        "segmento",
         "app",
         "os",
         "os_version",
@@ -50,28 +61,6 @@ def processing_reviews(spark: SparkSession, pathSource: str):
 
     return df_select
 
-def save_reviews(reviews_df: DataFrame, directory: str):
-    """
-    Salva os dados do DataFrame no formato Delta no diretório especificado.
-
-    Args:
-        reviews_df (DataFrame): DataFrame PySpark contendo as avaliações.
-        directory (str): Caminho do diretório onde os dados serão salvos.
-    """
-    try:
-        # Verifica se o diretório existe e cria-o se não existir
-        Path(directory).mkdir(parents=True, exist_ok=True)
-
-        # Escrever os dados no formato Delta
-        # reviews_df.write.format("delta").mode("overwrite").save(directory)
-        reviews_df.write.option("compression", "snappy").mode("overwrite").parquet(directory)
-        logging.info(f"[*] Dados salvos em {directory} no formato Delta")
-
-    except Exception as e:
-        logging.error(f"[*] Erro ao salvar os dados: {e}")
-        exit(1)
-
-
 def save_dataframe(df, path, label):
     """
     Salva o DataFrame em formato parquet e loga a operação.
@@ -83,11 +72,35 @@ def save_dataframe(df, path, label):
 
         if df.limit(1).count() > 0:  # Verificar existência de dados
             logging.info(f"[*] Salvando dados {label} para: {path}")
-            save_reviews(df, path)
+            # Verifica se o diretório existe e cria-o se não existir
+            Path(path).mkdir(parents=True, exist_ok=True)
+
+            df.write.option("compression", "snappy").mode("overwrite").parquet(path)
+            logging.info(f"[*] Dados salvos em {path} no formato Parquet")
         else:
             logging.warning(f"[*] Nenhum dado {label} foi encontrado!")
     except Exception as e:
         logging.error(f"[*] Erro ao salvar dados {label}: {e}", exc_info=True)
+
+        # Convertendo "segmento" para uma lista de strings
+        segmentos_unicos = [row["segmento"] for row in df.select("segmento").distinct().collect()]
+
+        # JSON de erro
+        error_metrics = {
+            "timestamp": datetime.now().isoformat(),
+            "layer": "silver",
+            "project": "compass",
+            "job": "internal_database_reviews",
+            "priority": "0",
+            "tower": "SBBR_COMPASS",
+            "client": segmentos_unicos,
+            "error": str(e)
+        }
+
+        metrics_json = json.dumps(error_metrics)
+
+        # Salvar métricas de erro no MongoDB
+        save_metrics_job_fail(metrics_json)
         
 def write_to_mongo(dados_feedback: dict, table_id: str):
 
@@ -140,6 +153,19 @@ def get_schema(df, schema):
 
 
 def processing_old_new(spark: SparkSession, df: DataFrame):
+    """
+    Compara os dados novos de avaliações de um aplicativo com os dados antigos já armazenados.
+    Quando há diferenças entre os novos e os antigos, essas mudanças são salvas em uma nova coluna chamada 'historical_data'.
+    O objetivo é manter um registro das alterações nas avaliações ao longo do tempo, permitindo ver como os dados evoluíram.
+
+
+    Args:
+        spark (SparkSession): A sessão ativa do Spark para ler e processar os dados.
+        df (DataFrame): DataFrame contendo os novos dados de reviews.
+
+    Returns:
+        DataFrame: DataFrame resultante contendo os dados combinados e o histórico de mudanças.
+    """
 
     # Obtenha a data atual
     current_date = datetime.now().strftime("%Y-%m-%d")
@@ -162,6 +188,9 @@ def processing_old_new(spark: SparkSession, df: DataFrame):
         if 'response' not in df.columns:
             df_historical = df_historical.withColumn("response", F.lit(None))
 
+        if 'segmento' not in df.columns:
+            df_historical = df_historical.withColumn("segmento", F.lit("NA"))
+
     else:
         # Se o caminho não existir, cria um DataFrame vazio com o mesmo esquema esperado
         schema = StructType([
@@ -175,6 +204,7 @@ def processing_old_new(spark: SparkSession, df: DataFrame):
             StructField("customer_id", StringType(), True),
             StructField("ip_address", StringType(), True),
             StructField("os", StringType(), True),
+            StructField("segmento", StringType(), True),
             StructField("os_version", StringType(), True),
             StructField("rating", StringType(), True),
             StructField("timestamp", StringType(), True),
@@ -204,6 +234,7 @@ def processing_old_new(spark: SparkSession, df: DataFrame):
                 F.col("old.cpf").alias("cpf"),
                 F.col("old.app").alias("app"),
                 F.col("old.comment").alias("comment"),
+                F.col("new.segmento").alias("segmento"),
                 F.col("old.rating").cast("string").alias("rating"),
                 F.col("old.timestamp").alias("timestamp"),
                 F.col("old.app_version").alias("app_version"),
@@ -217,6 +248,7 @@ def processing_old_new(spark: SparkSession, df: DataFrame):
                 F.col("old.cpf").alias("cpf"),
                 F.col("old.app").alias("app"),
                 F.col("old.comment").alias("comment"),
+                F.col("new.segmento").alias("segmento"),
                 F.col("old.rating").cast("string").alias("rating"),
                 F.col("old.timestamp").alias("timestamp"),
                 F.col("old.app_version").alias("app_version"),
@@ -230,6 +262,7 @@ def processing_old_new(spark: SparkSession, df: DataFrame):
                 F.col("old.cpf").alias("cpf"),
                 F.col("old.app").alias("app"),
                 F.col("old.comment").alias("comment"),
+                F.col("new.segmento").alias("segmento"),
                 F.col("old.rating").cast("string").alias("rating"),
                 F.col("old.timestamp").alias("timestamp"),
                 F.col("old.app_version").alias("app_version"),
@@ -243,6 +276,7 @@ def processing_old_new(spark: SparkSession, df: DataFrame):
                 F.col("old.cpf").alias("cpf"),
                 F.col("old.app").alias("app"),
                 F.col("old.comment").alias("comment"),
+                F.col("new.segmento").alias("segmento"),
                 F.col("old.rating").cast("string").alias("rating"),
                 F.col("old.timestamp").alias("timestamp"),
                 F.col("old.app_version").alias("app_version"),
@@ -256,6 +290,7 @@ def processing_old_new(spark: SparkSession, df: DataFrame):
                 F.col("old.cpf").alias("cpf"),
                 F.col("old.app").alias("app"),
                 F.col("old.comment").alias("comment"),
+                F.col("new.segmento").alias("segmento"),
                 F.col("old.rating").cast("string").alias("rating"),
                 F.col("old.timestamp").alias("timestamp"),
                 F.col("old.app_version").alias("app_version"),
@@ -269,6 +304,7 @@ def processing_old_new(spark: SparkSession, df: DataFrame):
                 F.col("old.cpf").alias("cpf"),
                 F.col("old.app").alias("app"),
                 F.col("old.comment").alias("comment"),
+                F.col("new.segmento").alias("segmento"),
                 F.col("old.rating").cast("string").alias("rating"),
                 F.col("old.timestamp").alias("timestamp"),
                 F.col("old.app_version").alias("app_version"),
@@ -282,6 +318,7 @@ def processing_old_new(spark: SparkSession, df: DataFrame):
                 F.col("old.cpf").alias("cpf"),
                 F.col("old.app").alias("app"),
                 F.col("old.comment").alias("comment"),
+                F.col("new.segmento").alias("segmento"),
                 F.col("old.rating").cast("string").alias("rating"),
                 F.col("old.timestamp").alias("timestamp"),
                 F.col("old.app_version").alias("app_version"),
@@ -295,6 +332,7 @@ def processing_old_new(spark: SparkSession, df: DataFrame):
                 F.col("old.cpf").alias("cpf"),
                 F.col("old.app").alias("app"),
                 F.col("old.comment").alias("comment"),
+                F.col("new.segmento").alias("segmento"),
                 F.col("old.rating").cast("string").alias("rating"),
                 F.col("old.timestamp").alias("timestamp"),
                 F.col("old.app_version").alias("app_version"),
@@ -308,6 +346,7 @@ def processing_old_new(spark: SparkSession, df: DataFrame):
                 F.col("old.cpf").alias("cpf"),
                 F.col("old.app").alias("app"),
                 F.col("old.comment").alias("comment"),
+                F.col("new.segmento").alias("segmento"),
                 F.col("old.rating").cast("string").alias("rating"),
                 F.col("old.timestamp").alias("timestamp"),
                 F.col("old.app_version").alias("app_version"),
@@ -317,36 +356,54 @@ def processing_old_new(spark: SparkSession, df: DataFrame):
         )
     )
 
-    print("tests")
     result_df_historical.printSchema()
 
     # Agrupando e coletando históricos
     df_final = result_df_historical.groupBy("new.id").agg(
-    F.coalesce(F.first(F.col("new.customer_id")), F.first(F.col("old.customer_id"))).alias("customer_id"),
-    F.coalesce(F.first(F.col("new.cpf_n")), F.first(F.col("old.cpf"))).alias("cpf"),
-    F.coalesce(F.first(F.col("new.app")), F.first(F.col("old.app"))).alias("app"),
-    F.coalesce(F.first(F.col("new.rating")), F.first(F.col("old.rating"))).alias("rating"),
-    F.coalesce(F.first(F.col("new.timestamp")), F.first(F.col("old.timestamp"))).alias("timestamp"),
-    F.coalesce(F.first(F.col("new.comment")), F.first(F.col("old.comment"))).alias("comment"),
-    F.coalesce(F.first(F.col("new.app_version")), F.first(F.col("old.app_version"))).alias("app_version"),
-    F.coalesce(F.first(F.col("new.os_version")), F.first(F.col("old.os_version"))).alias("os_version"),
-    F.coalesce(F.first(F.col("new.os")), F.first(F.col("old.os"))).alias("os"),
+        F.coalesce(F.first(F.col("new.customer_id")), F.first(F.col("old.customer_id"))).alias("customer_id"),
+        F.coalesce(F.first(F.col("new.cpf_n")), F.first(F.col("old.cpf"))).alias("cpf"),
+        F.coalesce(F.first(F.col("new.app")), F.first(F.col("old.app"))).alias("app"),
+        F.coalesce(F.first(F.col("new.rating")), F.first(F.col("old.rating"))).alias("rating"),
+        F.coalesce(F.first(F.col("new.timestamp")), F.first(F.col("old.timestamp"))).alias("timestamp"),
+        F.coalesce(F.first(F.col("new.comment")), F.first(F.col("old.comment"))).alias("comment"),
+        F.coalesce(F.first(F.col("new.app_version")), F.first(F.col("old.app_version"))).alias("app_version"),
+        F.coalesce(F.first(F.col("new.os_version")), F.first(F.col("old.os_version"))).alias("os_version"),
+        F.coalesce(F.first(F.col("new.os")), F.first(F.col("old.os"))).alias("os"),
+        F.first("new.segmento").alias("segmento"),
         F.flatten(F.collect_list("historical_data_temp")).alias("historical_data")
-)
+    )
 
 
-    # Exibe o resultado
-    df_final.show(truncate=False)
+    logging.info(f"[*] Visao final do processing_reviews", exc_info=True)
+    df_final.show()
 
     return df_final
 
 def save_metrics_job_fail(metrics_json):
     """
-    Salva as métricas no MongoDB.
+    Salva as métricas de aplicações com falhas
     """
+
+    ES_HOST = "http://elasticsearch:9200"
+    ES_INDEX = "compass_dt_datametrics_fail"
+    ES_USER = os.environ["ES_USER"]
+    ES_PASS = os.environ["ES_PASS"]
+
+    # Conectar ao Elasticsearch
+    es = Elasticsearch(
+        [ES_HOST],
+        basic_auth=(ES_USER, ES_PASS)
+    )
+
     try:
+        # Converter JSON em dicionário
         metrics_data = json.loads(metrics_json)
-        write_to_mongo(metrics_data, "dt_datametrics_fail_compass")
-        logging.info(f"[*] Métricas da aplicação salvas: {metrics_json}")
+
+        # Inserir no Elasticsearch
+        response = es.index(index=ES_INDEX, document=metrics_data)
+
+        logging.info(f"[*] Métricas da aplicação salvas no Elasticsearch: {response}")
     except json.JSONDecodeError as e:
         logging.error(f"[*] Erro ao processar métricas: {e}", exc_info=True)
+    except Exception as e:
+        logging.error(f"[*] Erro ao salvar métricas no Elasticsearch: {e}", exc_info=True)
