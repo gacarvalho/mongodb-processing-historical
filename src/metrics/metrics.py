@@ -56,16 +56,36 @@ class MetricsCollector:
     def collect_metrics(self, valid_df: DataFrame, invalid_df: DataFrame, validation_results: dict, id_app) -> str:
         """
         Coleta métricas de processamento, validação e recursos utilizados.
+
+        Args:
+            valid_df (DataFrame): DataFrame contendo os registros válidos.
+            invalid_df (DataFrame): DataFrame contendo os registros inválidos.
+            validation_results (dict): Dicionário com os resultados da validação.
+
+        Returns:
+            str: Um JSON com as métricas coletadas, incluindo:
+                - Informações gerais da aplicação (ID, sigla do projeto).
+                - Contagem de registros válidos e inválidos.
+                - Tempo total de processamento.
+                - Uso de memória.
+                - Número de nós de dados.
+                - Métricas de estágio do Spark.
+                - Resultados da validação.
+                - Contadores de sucesso e erro da validação.
+
+        Esta função coleta diversas métricas relacionadas ao processo de ingestão e validação de dados.
+        As métricas são calculadas com base nos DataFrames de dados válidos e inválidos, nos resultados da validação
+        e nas métricas de execução do Spark. O resultado final é um JSON que pode ser utilizado para monitoramento e análise.
         """
         if self.start_time is None or self.end_time is None:
-            raise ValueError("O tempo de início ou término não foi definido corretamente. Verifique a execução dos métodos start_collection e end_collection.")
+            raise ValueError("[*] O tempo de início ou término não foi definido corretamente. Verifique a execução dos métodos start_collection e end_collection.")
 
         total_time = self.end_time - self.start_time
         start_ts = self.start_time.strftime("%Y-%m-%d %H:%M:%S")
         end_ts = self.end_time.strftime("%Y-%m-%d %H:%M:%S")
+        timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
         memory_used = self.spark.sparkContext._jvm.org.apache.spark.util.SizeEstimator.estimate(valid_df._jdf) / (1024 * 1024)
-        data_nodes_count = len(self.spark.sparkContext.getConf().get("spark.executor.instances", "1").split(","))
         count_valid = valid_df.count()
         count_invalid = invalid_df.count()
         total_records = count_valid + count_invalid
@@ -79,15 +99,20 @@ class MetricsCollector:
             "type_consistency_check": validation_results["type_consistency_check"],
         }
 
+        # Contadores de sucesso e erro
         success_count = sum(1 for result in validation_metrics.values() if result["status"])
         error_count = len(validation_metrics) - success_count
+
+        # Convertendo "segmento" para uma lista de strings
+        segmentos_unicos = [row["segmento"] for row in valid_df.select("segmento").distinct().collect()]
+
 
         metrics = {
             "application_id": self.spark.sparkContext.applicationId,
             "sigla": {
                 "sigla": "DT",
                 "projeto": "compass",
-                "cat": "silver_historical"
+                "layer_lake": "silver_historical"
             },
             "valid_data": {
                 "count": count_valid,
@@ -100,19 +125,21 @@ class MetricsCollector:
             "total_records": total_records,
             "total_processing_time": str(total_time),
             "memory_used": memory_used,
-            "data_nodes_count": data_nodes_count,
             "stages": stage_metrics_dict,
             "validation_results": validation_metrics,
             "success_count": success_count,
             "error_count": error_count,
+            "type_client": segmentos_unicos,
             "source": {
                 "app": id_app,
-                "search": "internal_database"
+                "search": "apple_store"
             },
             "_ts": {
                 "compass_start_ts": start_ts,
                 "compass_end_ts": end_ts
-            }
+            },
+            "timestamp": timestamp
+
         }
 
         return json.dumps(metrics)
