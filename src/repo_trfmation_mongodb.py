@@ -85,27 +85,11 @@ def main():
         metrics_collector.end_collection()
         metrics_json = metrics_collector.collect_metrics(valid_df, invalid_df, validation_results, "silver_internal_database")
         # Salvar métricas no MongoDB
-        save_metrics(metrics_json)
+        save_metrics(metrics_json,valid_df)
 
     except Exception as e:
         logging.error(f"[*] An error occurred: {e}", exc_info=True)
-
-        # JSON de erro
-        error_metrics = {
-            "timestamp": datetime.now().isoformat(),
-            "layer": "silver",
-            "project": "compass",
-            "job": "apple_store_reviews",
-            "priority": "0",
-            "tower": "SBBR_COMPASS",
-            "client": "[NA]",
-            "error": str(e)
-        }
-
-        metrics_json = json.dumps(error_metrics)
-
-        # Salvar métricas de erro no MongoDB
-        save_metrics_job_fail(metrics_json)
+        log_error(e, df)
 
     finally:
         spark.stop()
@@ -123,7 +107,7 @@ def spark_session():
         raise
 
 
-def save_metrics(metrics_json):
+def save_metrics(metrics_json, df):
     """
     Salva as métricas.
     """
@@ -149,23 +133,7 @@ def save_metrics(metrics_json):
         logging.info(f"[*] Métricas da aplicação salvas no Elasticsearch: {response}")
     except json.JSONDecodeError as e:
         logging.error(f"[*] Erro ao processar métricas: {e}", exc_info=True)
-
-        # JSON de erro
-        error_metrics = {
-            "timestamp": datetime.now().isoformat(),
-            "layer": "silver",
-            "project": "compass",
-            "job": "apple_store_reviews",
-            "priority": "3",
-            "tower": "SBBR_COMPASS",
-            "client": "[NA]",
-            "error": str(e)
-        }
-
-        metrics_json = json.dumps(error_metrics)
-
-        # Salvar métricas de erro no MongoDB
-        save_metrics_job_fail(metrics_json)
+        log_error(e, df)
 
     except Exception as e:
         logging.error(f"[*] Erro ao salvar métricas no Elasticsearch: {e}", exc_info=True)

@@ -24,6 +24,26 @@ def remove_accents(s):
 
 remove_accents_udf = F.udf(remove_accents, StringType())
 
+def log_error(e, df):
+    """Gera e salva métricas de erro no Elastic."""
+
+    # Convertendo "segmento" para uma lista de strings
+    segmentos_unicos = [row["segmento"] for row in df.select("segmento").distinct().collect()]
+
+    error_metrics = {
+        "timestamp": datetime.now().isoformat(),
+        "layer": "silver",
+        "project": "compass",
+        "job": "mongodb_reviews",
+        "priority": "0",
+        "tower": "SBBR_COMPASS",
+        "client": segmentos_unicos,
+        "error": str(e)
+    }
+
+    # Serializa para JSON e salva no MongoDB
+    save_metrics_job_fail(json.dumps(error_metrics))
+
 def read_source_parquet(spark, path):
     """Tenta ler um Parquet e retorna None se não houver dados"""
     try:
@@ -81,26 +101,7 @@ def save_dataframe(df, path, label):
             logging.warning(f"[*] Nenhum dado {label} foi encontrado!")
     except Exception as e:
         logging.error(f"[*] Erro ao salvar dados {label}: {e}", exc_info=True)
-
-        # Convertendo "segmento" para uma lista de strings
-        segmentos_unicos = [row["segmento"] for row in df.select("segmento").distinct().collect()]
-
-        # JSON de erro
-        error_metrics = {
-            "timestamp": datetime.now().isoformat(),
-            "layer": "silver",
-            "project": "compass",
-            "job": "internal_database_reviews",
-            "priority": "0",
-            "tower": "SBBR_COMPASS",
-            "client": segmentos_unicos,
-            "error": str(e)
-        }
-
-        metrics_json = json.dumps(error_metrics)
-
-        # Salvar métricas de erro no MongoDB
-        save_metrics_job_fail(metrics_json)
+        log_error(e, df)
         
 
 def get_schema(df, schema):
