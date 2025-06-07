@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import pymongo
+import traceback
 import pyspark.sql.functions as F
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.functions import upper, udf, col, regexp_extract, input_file_name, lit
@@ -11,38 +12,29 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote_plus
 from unidecode import unidecode
+from typing import Optional, Union
 from elasticsearch import Elasticsearch
 try:
     from schema_mongodb import mongodb_schema_silver
 except ModuleNotFoundError:
     from src.schemas.schema_mongodb import mongodb_schema_silver
 
+# Logging estruturado
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(module)s - %(funcName)s - %(message)s"
+)
 
-# Função para remover acentos
+logger = logging.getLogger(__name__)
+
+
+# Função para remoção de acentos
 def remove_accents(s):
+    """Remove acentos e caracteres especiais de uma string"""
     return unidecode(s)
 
 remove_accents_udf = F.udf(remove_accents, StringType())
 
-def log_error(e, df):
-    """Gera e salva métricas de erro no Elastic."""
-
-    # Convertendo "segmento" para uma lista de strings
-    segmentos_unicos = [row["segmento"] for row in df.select("segmento").distinct().collect()]
-
-    error_metrics = {
-        "timestamp": datetime.now().isoformat(),
-        "layer": "silver",
-        "project": "compass",
-        "job": "mongodb_reviews",
-        "priority": "0",
-        "tower": "SBBR_COMPASS",
-        "client": segmentos_unicos,
-        "error": str(e)
-    }
-
-    # Serializa para JSON e salva no MongoDB
-    save_metrics_job_fail(json.dumps(error_metrics))
 
 def read_source_parquet(spark, path):
     """Tenta ler um Parquet e retorna None se não houver dados"""
@@ -81,28 +73,6 @@ def processing_reviews(df: DataFrame):
 
     return df_select
 
-def save_dataframe(df, path, label):
-    """
-    Salva o DataFrame em formato parquet e loga a operação.
-    """
-    try:
-        schema = mongodb_schema_silver()
-        # Alinhar o DataFrame ao schema definido
-        df = get_schema(df, schema)
-
-        if df.limit(1).count() > 0:  # Verificar existência de dados
-            logging.info(f"[*] Salvando dados {label} para: {path}")
-            # Verifica se o diretório existe e cria-o se não existir
-            Path(path).mkdir(parents=True, exist_ok=True)
-
-            df.write.option("compression", "snappy").mode("overwrite").parquet(path)
-            logging.info(f"[*] Dados salvos em {path} no formato Parquet")
-        else:
-            logging.warning(f"[*] Nenhum dado {label} foi encontrado!")
-    except Exception as e:
-        logging.error(f"[*] Erro ao salvar dados {label}: {e}", exc_info=True)
-        log_error(e, df)
-        
 
 def get_schema(df, schema):
     """
@@ -343,31 +313,160 @@ def processing_old_new(spark: SparkSession, df: DataFrame):
 
     return df_final
 
-def save_metrics_job_fail(metrics_json):
+def save_dataframe(
+        df: DataFrame,
+        path: str,
+        label: str,
+        schema: Optional[StructType] = None,
+        partition_column: str = "odate",
+        compression: str = "snappy"
+) -> bool:
     """
-    Salva as métricas de aplicações com falhas
+    Salva um DataFrame Spark no formato Parquet de forma robusta.
+
+    Args:
+        df: DataFrame a ser salvo
+        path: Caminho de destino
+        label: Identificação para logs (ex: 'valido', 'invalido')
+        schema: Schema opcional para validação
+        partition_column: Coluna de partição
+        compression: Tipo de compressão
+
+    Returns:
+        bool: True se salvou com sucesso, False caso contrário
+
+    Raises:
+        ValueError: Se os parâmetros forem inválidos
+        IOError: Se houver problemas ao escrever no filesystem
     """
+    if not isinstance(df, DataFrame):
+        logger.error(f"[*] Objeto passado não é um DataFrame Spark: {type(df)}")
+        return False
 
-    ES_HOST = "http://elasticsearch:9200"
-    ES_INDEX = "compass_dt_datametrics_fail"
-    ES_USER = os.environ["ES_USER"]
-    ES_PASS = os.environ["ES_PASS"]
+    if not path:
+        logger.error("Caminho de destino não pode ser vazio")
+        return False
 
-    # Conectar ao Elasticsearch
-    es = Elasticsearch(
-        [ES_HOST],
-        basic_auth=(ES_USER, ES_PASS)
-    )
+    current_date = datetime.now().strftime('%Y%m%d')
+    full_path = Path(path)
 
     try:
-        # Converter JSON em dicionário
-        metrics_data = json.loads(metrics_json)
+        if schema:
+            logger.info(f"[*] Aplicando schema para dados {label}")
+            df = get_schema(df, schema)
 
-        # Inserir no Elasticsearch
-        response = es.index(index=ES_INDEX, document=metrics_data)
+        df_partition = df.withColumn(partition_column, lit(current_date))
 
-        logging.info(f"[*] Métricas da aplicação salvas no Elasticsearch: {response}")
-    except json.JSONDecodeError as e:
-        logging.error(f"[*] Erro ao processar métricas: {e}", exc_info=True)
+        if not df_partition.head(1):
+            logger.warning(f"[*] Nenhum dado {label} encontrado para salvar")
+            return False
+
+        try:
+            full_path.mkdir(parents=True, exist_ok=True)
+            logger.debug(f"[*] Diretório {full_path} verificado/criado")
+        except Exception as dir_error:
+            logger.error(f"[*] Falha ao preparar diretório {full_path}: {dir_error}")
+            raise IOError(f"[*] Erro de diretório: {dir_error}") from dir_error
+
+        logger.info(f"[*] Salvando {df_partition.count()} registros ({label}) em {full_path}")
+
+        (df_partition.write
+         .option("compression", compression)
+         .mode("overwrite")
+         .partitionBy(partition_column)
+         .parquet(str(full_path)))
+
+        logger.info(f"[*] Dados {label} salvos com sucesso em {full_path}")
+        return True
+
     except Exception as e:
-        logging.error(f"[*] Erro ao salvar métricas no Elasticsearch: {e}", exc_info=True)
+        error_msg = f"[*] Falha ao salvar dados {label} em {full_path}"
+        logger.error(error_msg, exc_info=True)
+        logger.error(f"[*] Detalhes do erro: {str(e)}\n{traceback.format_exc()}")
+        return False
+
+def save_metrics(
+        metrics_type: str,
+        index: str,
+        error: Optional[Exception] = None,
+        df: Optional[DataFrame] = None,
+        metrics_data: Optional[Union[dict, str]] = None
+) -> None:
+    """
+    Salva métricas no Elasticsearch com estruturas específicas.
+
+    Args:
+        metrics_type: 'success' ou 'fail'
+        index: Nome do índice no Elasticsearch
+        error: Objeto de exceção (para tipo 'fail')
+        df: DataFrame (para extrair segmentos)
+        metrics_data: Dados das métricas (para tipo 'success')
+
+    Raises:
+        ValueError: Se os parâmetros forem inválidos
+    """
+    metrics_type = metrics_type.lower()
+
+    if metrics_type not in ('success', 'fail'):
+        raise ValueError("[*] O tipo deve ser 'success' ou 'fail'")
+
+    if metrics_type == 'fail' and not error:
+        raise ValueError("[*] Para tipo 'fail', o parâmetro 'error' é obrigatório")
+
+    if metrics_type == 'success' and not metrics_data:
+        raise ValueError("[*] Para tipo 'success', 'metrics_data' é obrigatório")
+
+    ES_HOST = os.getenv("ES_HOST", "http://elasticsearch:9200")
+    ES_USER = os.getenv("ES_USER")
+    ES_PASS = os.getenv("ES_PASS")
+
+    if not all([ES_USER, ES_PASS]):
+        raise ValueError("[*] Credenciais do Elasticsearch não configuradas")
+
+    if metrics_type == 'fail':
+        try:
+            segmentos_unicos = [row["segmento"] for row in df.select("segmento").distinct().collect()] if df else ["UNKNOWN_CLIENT"]
+        except Exception:
+            logger.warning("[*] Não foi possível extrair segmentos. Usando 'UNKNOWN_CLIENT'.")
+            segmentos_unicos = ["UNKNOWN_CLIENT"]
+
+        document = {
+            "timestamp": datetime.now().isoformat(),
+            "layer": "silver",
+            "project": "compass",
+            "job": "mongodb_reviews",
+            "priority": "0",
+            "tower": "SBBR_COMPASS",
+            "client": segmentos_unicos,
+            "error": str(error) if error else "Erro desconhecido"
+        }
+    else:
+        if isinstance(metrics_data, str):
+            try:
+                document = json.loads(metrics_data)
+            except json.JSONDecodeError as e:
+                raise ValueError("[*] metrics_data não é um JSON válido") from e
+        else:
+            document = metrics_data
+
+    try:
+        es = Elasticsearch(
+            hosts=[ES_HOST],
+            basic_auth=(ES_USER, ES_PASS),
+            request_timeout=30
+        )
+
+        response = es.index(
+            index=index,
+            document=document
+        )
+
+        logger.info(f"[*] Métricas salvas com sucesso no índice {index}. ID: {response['_id']}")
+        return response
+
+    except Exception as es_error:
+        logger.error(f"[*] Falha ao salvar no Elasticsearch: {str(es_error)}")
+        raise
+    except Exception as e:
+        logger.error(f"[*] Erro inesperado: {str(e)}")
+        raise

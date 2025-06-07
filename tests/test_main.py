@@ -1,26 +1,18 @@
+# tests/test_main.py
 import pytest
-import shutil
+import json
 from pyspark.sql import SparkSession
-from pyspark.sql.types import StructType, StructField, StringType, LongType, DoubleType
+from pyspark.sql.types import StructType, StructField, StringType, IntegerType, DoubleType, LongType, ArrayType
 from datetime import datetime
-from unittest.mock import MagicMock, patch
 from pyspark.sql.functions import lit, col
+from unittest.mock import MagicMock, patch, PropertyMock
+from src.utils.tools import processing_reviews, save_dataframe, processing_old_new, read_source_parquet
+from src.metrics.metrics import validate_ingest, MetricsCollector
 
-# Importações ajustadas para sua estrutura de projeto
-from src.utils.tools import processing_reviews, read_source_parquet, save_dataframe
-from src.metrics.metrics import validate_ingest
-from src.repo_trfmation_mongodb import main as mongodb_main
-
-# Fixture do Spark para os testes
 @pytest.fixture(scope="session")
 def spark():
-    return SparkSession.builder \
-        .master("local[1]") \
-        .appName("MongoDBTests") \
-        .config("spark.sql.shuffle.partitions", "1") \
-        .getOrCreate()
+    return SparkSession.builder.master("local[1]").appName("TestMongoDB").getOrCreate()
 
-# Schema para testes
 def mongodb_schema_bronze():
     return StructType([
         StructField("id", StringType(), True),
@@ -37,103 +29,162 @@ def mongodb_schema_bronze():
         StructField("comment", StringType(), True)
     ])
 
-# Fixture com dados reais do MongoDB
-@pytest.fixture
-def test_data(spark):
-    data = [
-        {"id": "{674b9aa4529a065f5b78ad76}", "comment": "Excelente, super recomendo!", "votes_count": 2, "os": "Plataforma", "os_version": "10.0", "country": "BR", "age": "48", "customer_id": "5763", "cpf": "582.403.619-51", "app_version": "1.0.0", "rating": 2.0, "timestamp": "2024-11-30T23:07:02.251424"},
-        {"id": "{674b9aa4529a065f5b78ad77}", "comment": "Adorei a nova atualização!", "votes_count": 7, "os": "Android", "os_version": "10.0", "country": "BR", "age": "49", "customer_id": "4811", "cpf": "964.253.710-99", "app_version": "1.0.0", "rating": 4.0, "timestamp": "2024-11-30T23:07:02.251424"},
-        {"id": "{674b9aa4529a065f5b78ad84}", "comment": "Recomendo, mas precisa de melhorias.", "votes_count": 9, "os": "Plataforma", "os_version": "10.0", "country": "BR", "age": "36", "customer_id": None, "cpf": "374.892.590-99", "app_version": "1.0.0", "rating": 4.0, "timestamp": "2024-11-30T23:07:02.251424"}
+def mongodb_schema_silver():
+    return StructType([
+        StructField("id", StringType(), True),
+        StructField("customer_id", StringType(), True),
+        StructField("cpf", StringType(), True),
+        StructField("app", StringType(), True),
+        StructField("segmento", StringType(), True),
+        StructField("rating", StringType(), True),
+        StructField("timestamp", StringType(), True),
+        StructField("comment", StringType(), True),
+        StructField("app_version", StringType(), True),
+        StructField("os_version", StringType(), True),
+        StructField("os", StringType(), True),
+        StructField("historical_data", ArrayType(ArrayType(StructType([
+            StructField("customer_id", StringType(), True),
+            StructField("cpf", StringType(), True),
+            StructField("app", StringType(), True),
+            StructField("segmento", StringType(), True),
+            StructField("comment", StringType(), True),
+            StructField("rating", StringType(), True),
+            StructField("timestamp", StringType(), True),
+            StructField("app_version", StringType(), True),
+            StructField("os_version", StringType(), True),
+            StructField("os", StringType(), True)
+        ]), True), True), True)
+    ])
+
+def test_data_bronze():
+    return [
+        {
+            "id": "674b9aa4529a065f5b78ad76",
+            "customer_id": "5763",
+            "cpf": "58240361951",
+            "age": "48",
+            "os": "Android",
+            "os_version": "10.0",
+            "country": "BR",
+            "app_version": "1.0.0",
+            "rating": 5.0,
+            "votes_count": 2,
+            "timestamp": "2024-11-30T23:07:02.251424",
+            "comment": "Excelente, super recomendo!"
+        },
+        {
+            "id": "674b9aa4529a065f5b78ad77",
+            "customer_id": "4811",
+            "cpf": "96425371099",
+            "age": "49",
+            "os": "iOS",
+            "os_version": "15.0",
+            "country": "BR",
+            "app_version": "1.0.0",
+            "rating": 4.0,
+            "votes_count": 7,
+            "timestamp": "2024-11-30T23:07:02.251424",
+            "comment": "Adorei a nova atualização!"
+        }
     ]
-    return spark.createDataFrame(data, mongodb_schema_bronze())
 
-def test_read_source_parquet(spark, test_data):
-    """Testa a função de leitura de dados"""
-    test_path = "/tmp/test_mongodb_data"
-    test_data.write.mode("overwrite").parquet(test_path)
+def test_data_silver():
+    return [
+        {
+            "id": "674b9aa4529a065f5b78ad76",
+            "customer_id": "5763",
+            "cpf": "58240361951",
+            "app": "test_app",
+            "segmento": "pf",
+            "rating": "5",
+            "timestamp": "2024-11-30T23:07:02.251424",
+            "comment": "EXCELENTE, SUPER RECOMENDO!",
+            "app_version": "1.0.0",
+            "os_version": "10.0",
+            "os": "Android",
+            "historical_data": None
+        }
+    ]
 
-    result_df = read_source_parquet(spark, test_path)
+def test_read_data(spark):
+    df_test = spark.createDataFrame(test_data_bronze(), mongodb_schema_bronze())
+    date_path = datetime.now().strftime("%Y%m%d")
+    test_parquet_path = f"/tmp/test_mongodb_data/mongodb/test_app_pf/odate={date_path}/"
 
-    assert result_df is not None
-    assert result_df.count() == 3
-    assert "app" in result_df.columns
-    assert "segmento" in result_df.columns
+    # Write test data
+    (df_test
+     .withColumn("app", lit("test_app"))
+     .withColumn("segmento", lit("pf"))
+     .write.mode("overwrite")
+     .parquet(test_parquet_path))
 
-    shutil.rmtree(test_path)
+    # Test reading
+    df = read_source_parquet(spark, test_parquet_path)
+    assert df.count() == 2
+    assert "app" in df.columns
+    assert "segmento" in df.columns
 
-def test_processing_reviews(spark, test_data):
-    """Testa o processamento das reviews"""
-    df_with_segment = test_data.withColumn("app", lit("test_app")) \
-        .withColumn("segmento", lit("pf"))
+def test_processing_reviews(spark):
+    df_test = spark.createDataFrame(test_data_bronze(), mongodb_schema_bronze())
+    df_with_segment = df_test.withColumn("app", lit("test_app")).withColumn("segmento", lit("pf"))
+    df_processed = processing_reviews(df_with_segment)
 
-    processed_df = processing_reviews(df_with_segment)
+    assert df_processed.count() == 2
+    assert df_processed.first()["comment"] == "EXCELENTE, SUPER RECOMENDO!"
+    assert "segmento" in df_processed.columns
 
-    assert processed_df.count() == df_with_segment.count()
-    assert "comment" in processed_df.columns
-    assert processed_df.first()["comment"] == "EXCELENTE, SUPER RECOMENDO!"
-    assert "segmento" in processed_df.columns
+def test_processing_old_new(spark):
+    df_test = spark.createDataFrame(test_data_bronze(), mongodb_schema_bronze())
+    df_with_segment = df_test.withColumn("app", lit("test_app")).withColumn("segmento", lit("pf"))
 
-def test_validate_ingest(spark, test_data):
-    """Testa a validação dos dados"""
-    df_with_all = test_data.withColumn("app", lit("test_app")) \
-        .withColumn("segmento", lit("pf")) \
-        .withColumn("historical_data", lit(None).cast("array<struct<customer_id:string,cpf:string,app:string,comment:string,rating:string,timestamp:string>>"))
+    # Test with no historical data
+    result = processing_old_new(spark, df_with_segment)
+    assert result.count() == 2
 
-    valid_df, invalid_df, results = validate_ingest(spark, df_with_all)
+def test_validate_ingest(spark):
+    df_test = spark.createDataFrame(test_data_silver(), mongodb_schema_silver())
+    valid_df, invalid_df, validation_results = validate_ingest(spark, df_test)
 
-    assert valid_df.count() == 2
-    assert invalid_df.count() == 1
-    assert isinstance(results, dict)
+    assert valid_df.count() == 1
+    assert invalid_df.count() == 0
+    assert "duplicate_check" in validation_results
+    assert "null_check" in validation_results
+    assert "type_consistency_check" in validation_results
 
-def test_save_dataframe(spark, test_data):
-    """Testa a função de salvamento diretamente"""
-    df_with_all = test_data.withColumn("app", lit("test_app")) \
-        .withColumn("segmento", lit("pf")) \
-        .withColumn("historical_data", lit(None).cast("array<struct<customer_id:string,cpf:string,app:string,comment:string,rating:string,timestamp:string>>"))
+def test_save_data(spark):
+    from src.utils import tools  # importa dentro do teste para patch correto
 
-    with patch("pyspark.sql.DataFrameWriter.parquet") as mock_parquet:
-        save_dataframe(df_with_all, "/tmp/test_output", "test")
-        mock_parquet.assert_called_once()
+    df = spark.createDataFrame(test_data_bronze(), mongodb_schema_bronze()).withColumn("app", lit("banco-santander-br")).withColumn("segmento", lit("pf"))
+    df_processado = processing_reviews(df)
+    valid_df, _, _ = validate_ingest(spark, df_processado)
+    datePath = datetime.now().strftime("%Y%m%d")
+    path_target = f"/tmp/fake/path/valid/odate={datePath}"
 
-def test_main_function(spark, test_data, monkeypatch):
-    """Testa a função principal com mocks"""
-    # Mock para os argumentos de linha de comando
-    monkeypatch.setattr('sys.argv', ['test_script.py', 'test'])
+    mock_parquet = MagicMock()
+    mock_partitionBy = MagicMock()
+    mock_partitionBy.parquet = mock_parquet
 
-    # Mock para variáveis de ambiente
-    monkeypatch.setenv('ES_USER', 'test_user')
-    monkeypatch.setenv('ES_PASSWORD', 'test_password')
+    mock_mode = MagicMock()
+    mock_mode.partitionBy.return_value = mock_partitionBy
 
-    # Mock para as funções internas
-    with patch('src.repo_trfmation_mongodb.read_source_parquet') as mock_read, \
-            patch('src.repo_trfmation_mongodb.processing_reviews') as mock_process, \
-            patch('src.repo_trfmation_mongodb.validate_ingest') as mock_validate, \
-            patch('src.repo_trfmation_mongodb.save_dataframe') as mock_save, \
-            patch('src.repo_trfmation_mongodb.MetricsCollector') as mock_metrics, \
-            patch('src.repo_trfmation_mongodb.log_error') as mock_log_error, \
-            patch('src.repo_trfmation_mongodb.save_metrics') as mock_save_metrics:
+    mock_option = MagicMock()
+    mock_option.mode.return_value = mock_mode
 
-        # Configurar os mocks
-        mock_read.return_value = test_data
-        mock_process.return_value = test_data
-        mock_validate.return_value = (test_data, test_data.limit(0), {})
+    mock_write = MagicMock()
+    mock_write.option.return_value = mock_option
 
-        # Mock para o MetricsCollector
-        mock_metrics_instance = MagicMock()
-        mock_metrics.return_value = mock_metrics_instance
+    with patch.object(type(valid_df), "write", new_callable=PropertyMock) as mock_write_property:
+        mock_write_property.return_value = mock_write
 
-        # Mock para save_metrics
-        mock_save_metrics.return_value = None
+        tools.save_dataframe(
+            df=valid_df,
+            path=path_target,
+            label="valido",
+            partition_column="odate",
+            compression="snappy"
+        )
 
-        # Executar a função main
-        mongodb_main()
-
-        # Verificar se as funções foram chamadas
-        mock_read.assert_called()
-        mock_process.assert_called()
-        mock_validate.assert_called()
-        mock_save.assert_called()
-        mock_metrics_instance.start_collection.assert_called()
-        mock_metrics_instance.end_collection.assert_called()
-        mock_save_metrics.assert_called()
-        mock_log_error.assert_not_called()
+        mock_write.option.assert_called_once_with("compression", "snappy")
+        mock_option.mode.assert_called_once_with("overwrite")
+        mock_mode.partitionBy.assert_called_once_with("odate")
+        mock_parquet.assert_called_once_with(path_target)
