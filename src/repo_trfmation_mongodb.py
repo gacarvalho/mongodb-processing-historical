@@ -39,8 +39,8 @@ class PipelineConfig:
         self.date_str = datetime.now().strftime("%Y%m%d")
         self.path_source_pf = f"{PATH_BRONZE_BASE}*_pf/odate={self.date_str}/"
         self.path_source_pj = f"{PATH_BRONZE_BASE}*_pj/odate={self.date_str}/"
-        self.path_target = f"{PATH_SILVER_BASE}odate={self.date_str}/"
-        self.path_target_fail = f"{PATH_SILVER_FAIL_BASE}odate={self.date_str}/"
+        self.path_target = f"{PATH_SILVER_BASE}"
+        self.path_target_fail = f"{PATH_SILVER_FAIL_BASE}"
 
 
 def create_spark_session() -> SparkSession:
