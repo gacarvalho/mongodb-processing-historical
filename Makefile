@@ -10,7 +10,7 @@ create-network:
 
 
 build-app-silver-reviews-mongodb:
-	docker build -t iamgacarvalho/dmc-app-silver-reviews-mongodb:$(VERSION_REPOSITORY_DOCKER)  .
+		docker build -t iamgacarvalho/dmc-app-silver-reviews-mongodb:$(VERSION_REPOSITORY_DOCKER)  .
 	docker push iamgacarvalho/dmc-app-silver-reviews-mongodb:$(VERSION_REPOSITORY_DOCKER)
 
 restart-docker:

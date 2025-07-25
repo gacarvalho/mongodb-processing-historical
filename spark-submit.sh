@@ -91,6 +91,7 @@ run_spark_submit() {
     --conf spark.yarn.appMasterEnv.MONGO_PORT=27017 \
     --conf spark.yarn.appMasterEnv.MONGO_DB=compass \
     --name dmc_silver_reviews_mongodb_$CONFIG_ENV \
+    --conf spark.sql.sources.partitionOverwriteMode=dynamic \
     /app/repo_trfmation_mongodb.py $CONFIG_ENV"
 
   # Exibe o comando para depuração
